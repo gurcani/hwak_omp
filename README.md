@@ -19,7 +19,9 @@ the full list can be found in [hwak_omp.py](https://github.com/gurcani/hwak_omp/
 In order to compile pcvodeg, you need to do something like:
 
 ```
-cd pcvgodeg
+cd pcvodeg
 cmake -L
 make
 ```
+
+this generically fails if it cannot find the sundials library.
