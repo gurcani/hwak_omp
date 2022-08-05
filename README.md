@@ -14,6 +14,8 @@ hw=hasegawa_wakatani(modified=True,C=10.0,kap=1.0, Npx=1024, Npy=1024)
  ```
 the full list can be found in [hwak_omp.py](https://github.com/gurcani/hwak_omp/blob/main/hwak_omp.py) in the lists *default_parameters*, *default_solver_parameters*, *default_controls*.
 
+a complete example can be found in the directory [run1](https://github.com/gurcani/hwak_omp/tree/main/run1)
+
 # pcvodeg
 
 In order to compile pcvodeg, you need to do something like:
