@@ -19,19 +19,23 @@ void init_solver(int N,int nthreads, double *y, double t0, void (*fnpy)(double,d
   SUNNonlinearSolver NLS;
   int state;
   pcv_pars *p;
+  SUNContext sunctx;
   p=malloc(sizeof(pcv_pars));
   p->N=N;
   p->nthreads=nthreads;
   p->y=y;
   p->t0=t0;
   p->fnpy=fnpy;
-  p->uv=N_VMake_OpenMP(N,y,nthreads);
-  p->solver=CVodeCreate(CV_ADAMS);
+
+  /* Create the SUNDIALS context */
+  state = SUNContext_Create(NULL, &(sunctx));
+  p->uv=N_VMake_OpenMP(N,y,nthreads,sunctx);
+  p->solver=CVodeCreate(CV_ADAMS,sunctx);
   state = CVodeSetUserData(p->solver, p);
   state = CVodeSetMaxNumSteps(p->solver, mxsteps);
   state = CVodeInit(p->solver, fnpvodeg,t0,p->uv);
   state = CVodeSStolerances(p->solver, rtol, atol);
-  NLS = SUNNonlinSol_FixedPoint(p->uv, 0);
+  NLS = SUNNonlinSol_FixedPoint(p->uv, 0,sunctx);
   state = CVodeSetNonlinearSolver(p->solver, NLS);
   p_glob=p;
 };

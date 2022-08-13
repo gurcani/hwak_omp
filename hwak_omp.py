@@ -32,6 +32,7 @@ default_parameters={
     'nuZF':0.0,
     'nthreads': 4,
     'nuksqrpow' : 1,
+    'Amp0' : 1e-4
 }
 
 default_solver_parameters={
@@ -58,6 +59,15 @@ def oneover(x):
     inds=np.nonzero(x)
     res[inds]=1/x[inds]
     return res
+
+def lincompfreq(lm):
+    w,v=np.linalg.eig(lm.T)
+    ia=np.argmax(np.real(w.T),axis=0)
+    om1=1j*np.array([[w.T[ia[l,j],l,j] for j in range(ia.shape[1])] for l in range(ia.shape[0])]).conj()
+#    xi1=np.array([[v.T[ia[l,j],l,j] for j in range(ia.shape[1])] for l in range(ia.shape[0])]).conj()
+    om2=1j*np.array([[w.T[(ia[l,j]+1)%2,l,j] for j in range(ia.shape[1])] for l in range(ia.shape[0])]).conj()
+#    xi2=1j*np.array([[v.T[(ia[l,j]+1)%2,l,j] for j in range(ia.shape[1])] for l in range(ia.shape[0])]).conj()
+    return om1,om2#,xi1,xi2
 
 def hermsymznyq(u):
     Nx=u.shape[-2]
@@ -152,10 +162,9 @@ def init_linmats(pars,kx,ky,ksqr):
     nlm[:,int(nlm.shape[1]/2),:]=0.0
     return lm,nlm,forcelm
 
-def init_fields(uk,kx,ky):
+def init_fields(uk,kx,ky,A=1e-4):
     kx0,ky0=0,0
     sigkx,sigky=0.5,0.5
-    A=1e-4
     th=np.zeros(kx.shape)
     th[:,:]=np.random.rand(kx.shape[0],kx.shape[1])*2*np.pi;
     phik0=A*np.exp(-(kx-kx0)**2/2/sigkx**2-(ky-ky0)**2/2/sigky**2)*np.exp(1j*th);
@@ -186,11 +195,20 @@ def save_fields(fl,**kwargs):
         if not l in grp:
             if(np.isscalar(m)):
                 grp.create_dataset(l,(1,),maxshape=(None,),dtype=type(m))
-            else:                   
-                grp.create_dataset(l,(1,)+m.shape,maxshape=(None,)+m.shape,dtype=m.dtype)
-        lptr=grp[l]
-        lptr.resize((lptr.shape[0]+1,)+lptr.shape[1:])
-        lptr[-1,]=m
+                if(not fl.swmr_mode):
+                    fl.swmr_mode = True
+            else:
+                grp.create_dataset(l,(1,)+m.shape,chunks=(1,)+m.shape,maxshape=(None,)+m.shape,dtype=m.dtype)
+                if(not fl.swmr_mode):
+                    fl.swmr_mode = True
+            lptr=grp[l]
+            lptr[-1,]=m
+        else:
+            lptr=grp[l]
+            lptr.resize((lptr.shape[0]+1,)+lptr.shape[1:])
+            lptr[-1,]=m
+        lptr.flush()
+        fl.flush()
 
 def save_data(fl,**kwargs):
     if not ('data' in fl):
@@ -218,16 +236,22 @@ class hasegawa_wakatani:
                 print(l,'is neither a parameter nor a control flag')
         if('onlydiag' in kwargs.keys() and 'saveresult' not in kwargs.keys() and controls['onlydiag']):
             controls['saveresult']==False
-        if(controls['onlydiag'] or controls['wecontinue']):
-            fl=h5.File(controls['flname'], 'r+')
+        if(controls['onlydiag']):
+            fl=h5.File(controls['flname'],'r',libver='latest',swmr=True)
+            params=load_pars(fl)
+        elif(controls['wecontinue']):
+            fl=h5.File(controls['flname'], 'r+',libver='latest')
+            fl.swmr_mode = True
             params=load_pars(fl)
         else:
             if(controls['flname']):
-                fl=h5.File(controls['flname'],'w')
+                fl=h5.File(controls['flname'],'w',libver='latest')
+                fl.swmr_mode = True
         Npx,Npy=params['Npx'],params['Npy']
         padx,pady=params['padx'],params['pady']
         Lx,Ly=params['Lx'],params['Ly']
         Nx,Ny=int(Npx/padx/2)*2,int(Npy/pady/2)*2
+        Amp0=params['Amp0']
         if(controls['onlydiag'] or controls['wecontinue']):
             kx=fl['data/kx'][()]
             ky=fl['data/ky'][()]
@@ -240,7 +264,7 @@ class hasegawa_wakatani:
             uk[:]=fl['fields/uk'][-1,]
             t0=fl['fields/t'][-1]
         else:
-            init_fields(uk,kx,ky)
+            init_fields(uk,kx,ky,A=Amp0)
             t0=svpars['t0']
         if(controls['saveresult']):
             save_pars(fl,params)
@@ -268,19 +292,22 @@ class hasegawa_wakatani:
         self.fl=fl
         self.t0=t0
 #        self.run=self.run_pcvodeg()
-
+    
     def rhs(self,t,y,dukdt):
         uk=y.view(dtype=complex).reshape(dukdt.shape)
         self.datk.fill(0)
         hermsymznyq(uk)
         multin(uk,self.datk,self.kx,self.ky,self.ksqr)
-        self.pf6()
+        self.pf6.execute()
         multout62(self.datk.view(dtype=float))
-        self.pf2()
+        self.pf2.execute()
         multvec(dukdt,uk,self.lm,self.datk[:2,],self.nlm,self.forcelm)
         hermsymznyq(dukdt)
         return dukdt.ravel().view(dtype=float)
-
+    
+    def linfreq(self):
+        return lincompfreq(self.lm)
+    
     def run(self):
         t1,dtstep,dtout,atol,rtol,mxsteps=[self.svpars[l] for l in ['t1','dtstep','dtout','atol','rtol','mxsteps']]
         t0=self.t0
